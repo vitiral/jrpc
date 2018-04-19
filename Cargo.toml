@@ -1,0 +1,9 @@
+[package]
+name = "jsonrpc_spec"
+version = "0.1.0"
+authors = ["Garrett Berg <vitiral@gmail.com>"]
+
+[dependencies]
+serde = "1.0.40"
+serde_derive = "1.0.40"
+std_prelude = "0.2.12"
