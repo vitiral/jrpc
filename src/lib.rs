@@ -18,6 +18,9 @@ extern crate std_prelude;
 pub use serde_json::Value;
 
 mod serialize;
+mod from_string;
+
+pub use from_string::from_str;
 
 use std_prelude::*;
 use std::fmt;
@@ -30,54 +33,19 @@ use serde::de;
 pub type Result<T: Serialize + DeserializeOwned> =
     result::Result<Response<T>, Error<serde_json::Value>>;
 
-/// Deserialize a jsonrpc Response into a rust Result.
-pub fn from_str<T: Serialize + DeserializeOwned>(
-    s: &str,
-) -> result::Result<Result<T>, DeResultError> {
-    let result: result::Result<Response<T>, _> = serde_json::from_str(s);
-    if let Ok(r) = result {
-        return Ok(Ok(r));
-    }
-    let error: result::Result<Error<Value>, _> = serde_json::from_str(s);
-    if let Ok(e) = error {
-        return Ok(Err(e));
-    }
-
-    let value: Value = match serde_json::from_str(s) {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(DeResultError {
-                hint: format!("Invalid JSON: {:?}", s),
-                cause: Some(e.to_string()),
-            })
-        }
-    };
-
-    let _object = match value {
-        Value::Object(o) => o,
-        _ => {
-            return Err(DeResultError {
-                hint: format!("Not an object: {:?}", s),
-                cause: None,
-            })
-        }
-    };
-
-    // TODO: keep going, looking for why it failed
-    // - `jsonrpc` wasn't there or was incorrect.
-    // - Both result and error were present.
-    Err(DeResultError {
-        hint: format!("could not deserialize into either result or error: {:?}", s,),
-        cause: None,
-    })
-}
-
 /// An error that happens if the result could not be deserialized into either
 /// Response or Error type.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct DeResultError {
     hint: String,
-    cause: Option<String>,
+}
+
+impl DeResultError {
+    pub fn new(hint: String) -> Self {
+        Self {
+            hint: hint,
+        }
+    }
 }
 
 impl fmt::Display for DeResultError {
@@ -87,8 +55,8 @@ impl fmt::Display for DeResultError {
 }
 
 impl ::std::error::Error for DeResultError {
-    fn description(&self) -> &'static str {
-        "Could not deserialize into either Response or Error jsonrpc objects"
+    fn description(&self) -> &str {
+        &self.hint
     }
 }
 
