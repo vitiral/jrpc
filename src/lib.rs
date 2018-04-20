@@ -352,15 +352,16 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
 
 impl<T: Serialize + DeserializeOwned> Request<T> {
     /// Create a new Request.
-    pub fn new<I, S>(id: I, method: S) -> Self
+    pub fn new<I, S>(id: I, method: S) -> Request<()>
     where
         I: Into<IdReq>,
         S: Into<String>,
     {
-        Self {
+        let params: Option<()> = None;
+        Request {
             jsonrpc: V2_0,
             method: method.into(),
-            params: None,
+            params: params,
             id: id.into(),
         }
     }
