@@ -52,12 +52,12 @@ impl<'de> de::Visitor<'de> for V2_0Visitor {
 
 impl<'de> de::Deserialize<'de> for V2_0 {
     fn deserialize<D>(deserializer: D) -> result::Result<V2_0, D::Error>
-        where D: de::Deserializer<'de>
+    where
+        D: de::Deserializer<'de>,
     {
         deserializer.deserialize_str(V2_0Visitor)
     }
 }
-
 
 // ##################################################
 // # ERROR CODE
@@ -104,7 +104,8 @@ impl<'de> de::Visitor<'de> for ErrorCodeVisitor {
 
 impl<'de> de::Deserialize<'de> for ErrorCode {
     fn deserialize<D>(deserializer: D) -> result::Result<ErrorCode, D::Error>
-        where D: de::Deserializer<'de>
+    where
+        D: de::Deserializer<'de>,
     {
         deserializer.deserialize_i64(ErrorCodeVisitor)
     }

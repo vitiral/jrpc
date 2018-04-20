@@ -3,7 +3,7 @@
 //! This crate defines the datatypes for the jsonrpc spec... and that is IT.
 //!
 //! This crate never touches the network, filesystem, etc. It simply uses serde
-//! to easily construct, serialize and deserialize Request, Result and Error
+//! to easily construct, serialize and deserialize Request, Response and Error
 //! data types.
 //!
 //! http://www.jsonrpc.org/specification_v2
@@ -85,7 +85,9 @@ impl From<i64> for Id {
     }
 }
 
-/// The jsonrpc Request object.
+/// A rpc call is represented by sending a Request object to a Server.
+///
+/// See the parameters for details.
 ///
 /// # Examples
 ///
@@ -118,20 +120,38 @@ impl From<i64> for Id {
 pub struct Request<T> {
     /// A String specifying the version of the JSON-RPC protocol. MUST be exactly "2.0".
     pub jsonrpc: V2_0,
+
     /// A String containing the name of the method to be invoked.
     ///
-    /// Method names that begin with the word rpc followed by a period character (U+002E or ASCII
-    /// 46) are reserved for rpc-internal methods and extensions and MUST NOT be used for anything
-    /// else.
+    /// Method names that begin with the word rpc followed by a period character (`'.'`, `U+002E`
+    /// or ASCII `0x2e`) are reserved for rpc-internal methods and extensions and MUST NOT be used
+    /// for anything else.
     pub method: String,
+
     /// A Structured value that holds the parameter values to be used during the invocation of the
     /// method.
+    ///
+    /// ## Spec Requiement
+    ///
+    /// > Note: the following spec is **not** upheld by this library.
+    ///
+    /// If present, parameters for the rpc call MUST be provided as a Structured value. Either
+    /// by-position through an Array or by-name through an Object.
+    ///
+    /// - by-position: params MUST be an Array, containing the values in the Server expected
+    ///   order.
+    /// - by-name: params MUST be an Object, with member names that match the Server expected
+    ///   parameter names. The absence of expected names MAY result in an error being
+    ///   generated. The names MUST match exactly, including case, to the method's expected
+    ///   parameters.
+    ///
     pub params: Option<T>,
+
     /// The `id`. See [`Id`](enum.Id.html)
     pub id: Id,
 }
 
-impl<T: Serialize+DeserializeOwned> Request<T> {
+impl<T: Serialize + DeserializeOwned> Request<T> {
     pub fn new(id: Id, method: String) -> Self {
         Self {
             jsonrpc: V2_0,
@@ -141,8 +161,7 @@ impl<T: Serialize+DeserializeOwned> Request<T> {
         }
     }
 
-    pub fn with_params(id: Id, method: String, params: T) -> Self
-    {
+    pub fn with_params(id: Id, method: String, params: T) -> Self {
         Self {
             jsonrpc: V2_0,
             method: method,
@@ -152,18 +171,20 @@ impl<T: Serialize+DeserializeOwned> Request<T> {
     }
 }
 
-/// The jsonrpc Result response, indicating a successful result.
+/// The jsonrpc Response response, indicating a successful result.
+///
+/// See the parameters for more information.
 ///
 /// # Examples
 ///
 /// ```rust
 /// # extern crate jrpc;
 /// extern crate serde_json;
-/// use jrpc::{Id, Result};
+/// use jrpc::{Id, Response};
 ///
 /// # fn main() {
 /// let data: Vec<u32> = vec![1, 2, 3];
-/// let example = Result::new(Id::from(4), data.clone());
+/// let example = Response::new(Id::from(4), data.clone());
 /// let json = r#"
 /// {
 ///     "jsonrpc": "2.0",
@@ -177,13 +198,23 @@ impl<T: Serialize+DeserializeOwned> Request<T> {
 /// # }
 /// ```
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Result<T> {
+pub struct Response<T> {
+    /// A String specifying the version of the JSON-RPC protocol. MUST be exactly "2.0".
     pub jsonrpc: V2_0,
+
+    /// The value of this member is determined by the method invoked on the Server.
     pub result: T,
+
+    /// This member is REQUIRED.
+    ///
+    /// It MUST be the same as the value of the id member in the Request Object.
+    ///
+    /// If there was an error in detecting the id in the Request object (e.g. Parse error/Invalid
+    /// Request), it MUST be Null.
     pub id: Id,
 }
 
-impl<T: Serialize+DeserializeOwned> Result<T> {
+impl<T: Serialize + DeserializeOwned> Response<T> {
     pub fn new(id: Id, result: T) -> Self {
         Self {
             jsonrpc: V2_0,
@@ -195,10 +226,10 @@ impl<T: Serialize+DeserializeOwned> Result<T> {
 
 /// The jsonrpc Error response, indicating an error.
 ///
+/// # Examples
+///
 /// Since the `T` in the `ErrorObject` will _at least_ be based on the `ErrorCode` it is
 /// recommended that you deserialize this type as `T=Value` first.
-///
-/// # Examples
 ///
 /// ```rust
 /// # extern crate jrpc;
@@ -251,20 +282,39 @@ pub struct Error<T> {
     pub id: Id,
 }
 
-
 /// The jsonrpc Error object, with details of the error.
 ///
-/// Typically you may want to deserialze this with `T == serde_json::Value`
-/// to first inspect the value of the `ErrorCode`.
+/// When a rpc call encounters an error, the Response Object MUST contain the error member with a
+/// value that is a Object. See the attributes for details.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ErrorObject<T> {
+    /// The error code. See [`ErrorCode`](enum.ErrorCode.html)
     pub code: ErrorCode,
+
+    /// A String providing a short description of the error.
+    ///
+    /// The message SHOULD be limited to a concise single sentence.
     pub message: String,
+
+    /// A Primitive or Structured value that contains additional information about the error.
+    ///
+    /// This may be omitted.
+    ///
+    /// The value of this member is defined by the Server (e.g. detailed error
+    /// information, nested errors etc.).
     pub data: Option<T>,
 }
 
-/// An error code.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+/// A Number that indicates the error type that occurred.
+/// This MUST be an integer.
+///
+/// The error codes from and including -32768 to -32000 are reserved for pre-defined errors.
+/// Any code within this range, but not defined explicitly below is reserved for future use.
+/// The error codes are nearly the same as those suggested for XML-RPC at the following url:
+/// http://xmlrpc-epi.sourceforge.net/specs/rfc.fault_codes.php
+///
+/// Use the [`is_valid()`](enum.ErrorCode.html#method.is_valid) method to determine compliance.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum ErrorCode {
     /// - `-32700`: Parse error. Invalid JSON was received by the server.
     ///   An error occurred on the server while parsing the JSON text.
@@ -284,9 +334,9 @@ pub enum ErrorCode {
 impl ErrorCode {
     /// Return whether the ErrorCode is correct.
     ///
-    /// This will only return `false` if this is ServerError and is outside of the range of -32000
+    /// This will only return `false` if this is `ServerError` and is outside of the range of -32000
     /// to -32099.
-    fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         match *self {
             ErrorCode::ServerError(value) => {
                 if (-32099 <= value) && (value <= -32000) {

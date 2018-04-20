@@ -14,4 +14,3 @@ fn test_id() {
     let id: Id = serde_json::from_str("null").unwrap();
     assert_eq!(id, Id::Null);
 }
-
