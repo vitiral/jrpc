@@ -14,7 +14,7 @@ mod serialize;
 
 use std_prelude::*;
 use serde::ser::Serialize;
-use serde::de::Deserialize;
+use serde::de::{Deserialize, DeserializeOwned};
 
 /// The `jsonrpc` version. Will serialize/deserialize to/from `"2.0"`.
 pub struct V2_0;
@@ -22,6 +22,26 @@ pub struct V2_0;
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(untagged)]
 /// The jsonrpc `id` field. Can be a string, integer or null.
+///
+/// # Examples
+///
+/// ```rust
+/// # extern crate jrpc;
+/// extern crate serde_json;
+/// use jrpc::Id;
+///
+/// # fn main() {
+/// assert_eq!(Id::from(4), Id::Int(4));
+/// assert_eq!(
+///     serde_json::from_str::<Id>("4").unwrap(),
+///     Id::Int(4),
+/// );
+/// assert_eq!(
+///     serde_json::from_str::<Id>("\"foo\"").unwrap(),
+///     Id::String("foo".into()),
+/// );
+/// # }
+/// ```
 pub enum Id {
     String(String),
     Int(u64),
@@ -42,11 +62,59 @@ impl From<u64> for Id {
 
 #[derive(Debug, Serialize, Deserialize)]
 /// The jsonrpc Request object.
+///
+/// # Examples
+///
+/// ```rust
+/// # extern crate jrpc;
+/// extern crate serde_json;
+/// use jrpc::{Id, Request, V2_0};
+///
+/// # fn main() {
+/// let value: Vec<u32> = vec![1, 2, 3];
+/// let request = Request::with_params(
+///     Id::from(4),
+///     "CreateFoo".into(),
+///     Some(value.clone()),
+/// );
+/// let json = r#"
+/// {"jsonrpc": "2.0",
+///     "method": "CreateFoo",
+///     "params": [1,2,3],
+///     "id": 4
+/// }
+/// "#;
+/// let json = json.replace("\n", "").replace(" ", "");
+/// let result = serde_json::to_string(&request).unwrap();
+/// assert_eq!(json, result);
+/// # }
+/// ```
 pub struct Request<T> {
     pub jsonrpc: V2_0,
     pub method: String,
     pub params: Option<T>,
     pub id: Id,
+}
+
+impl<T: Serialize+DeserializeOwned> Request<T> {
+    pub fn new(id: Id, method: String) -> Self {
+        Self {
+            jsonrpc: V2_0,
+            method: method,
+            params: None,
+            id: id,
+        }
+    }
+
+    pub fn with_params(id: Id, method: String, params: T) -> Self
+    {
+        Self {
+            jsonrpc: V2_0,
+            method: method,
+            params: Some(params),
+            id: id,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
