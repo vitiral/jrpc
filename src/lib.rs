@@ -12,13 +12,85 @@
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+extern crate serde_json;
 extern crate std_prelude;
+
+pub use serde_json::Value;
 
 mod serialize;
 
 use std_prelude::*;
+use std::fmt;
+use std::result;
 use serde::ser::Serialize;
 use serde::de::{Deserialize, DeserializeOwned};
+use serde::de;
+
+/// An undetermined Response object. Get using `from_str`.
+pub type Result<T: Serialize + DeserializeOwned> =
+    result::Result<Response<T>, Error<serde_json::Value>>;
+
+/// Deserialize a jsonrpc Response into a rust Result.
+pub fn from_str<T: Serialize + DeserializeOwned>(
+    s: &str,
+) -> result::Result<Result<T>, DeResultError> {
+    let result: result::Result<Response<T>, _> = serde_json::from_str(s);
+    if let Ok(r) = result {
+        return Ok(Ok(r));
+    }
+    let error: result::Result<Error<Value>, _> = serde_json::from_str(s);
+    if let Ok(e) = error {
+        return Ok(Err(e));
+    }
+
+    let value: Value = match serde_json::from_str(s) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(DeResultError {
+                hint: format!("Invalid JSON: {:?}", s),
+                cause: Some(e.to_string()),
+            })
+        }
+    };
+
+    let _object = match value {
+        Value::Object(o) => o,
+        _ => {
+            return Err(DeResultError {
+                hint: format!("Not an object: {:?}", s),
+                cause: None,
+            })
+        }
+    };
+
+    // TODO: keep going, looking for why it failed
+    // - `jsonrpc` wasn't there or was incorrect.
+    // - Both result and error were present.
+    Err(DeResultError {
+        hint: format!("could not deserialize into either result or error: {:?}", s,),
+        cause: None,
+    })
+}
+
+/// An error that happens if the result could not be deserialized into either
+/// Response or Error type.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct DeResultError {
+    hint: String,
+    cause: Option<String>,
+}
+
+impl fmt::Display for DeResultError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", ::std::error::Error::description(self))
+    }
+}
+
+impl ::std::error::Error for DeResultError {
+    fn description(&self) -> &'static str {
+        "Could not deserialize into either Response or Error jsonrpc objects"
+    }
+}
 
 /// The `jsonrpc` version. Will serialize/deserialize to/from `"2.0"`.
 pub struct V2_0;
@@ -198,6 +270,7 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
 /// # }
 /// ```
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Response<T> {
     /// A String specifying the version of the JSON-RPC protocol. MUST be exactly "2.0".
     pub jsonrpc: V2_0,
@@ -276,6 +349,7 @@ impl<T: Serialize + DeserializeOwned> Response<T> {
 /// # }
 /// ```
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Error<T> {
     pub jsonrpc: V2_0,
     pub error: ErrorObject<T>,
