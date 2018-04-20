@@ -110,7 +110,7 @@ pub struct Error<T> {
 }
 
 
-// #[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ErrorObject<T> {
     pub code: ErrorCode,
     pub message: String,
@@ -132,8 +132,6 @@ pub enum ErrorCode {
     InternalError,
     /// -32000 to -32099 	Server error 	Reserved for implementation-defined server-errors.
     ServerError(i64),
-    /// Unknown Error Code
-    Unknown(i64),
 }
 
 impl ser::Serialize for ErrorCode {
@@ -141,13 +139,21 @@ impl ser::Serialize for ErrorCode {
     where
         S: ser::Serializer,
     {
-        serializer.serialize_str("2.0")
+        let value = match *self {
+            ErrorCode::ParseError => -32700,
+            ErrorCode::InvalidRequest => -32600,
+            ErrorCode::MethodNotFound => -32601,
+            ErrorCode::InvalidParams => -32602,
+            ErrorCode::InternalError => -32603,
+            ErrorCode::ServerError(value) => value,
+        };
+        serializer.serialize_i64(value)
     }
 }
 
 impl de::Expected for ErrorCode {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("\"2.0\"")
+        write!(formatter, "{:?}", self)
     }
 }
 
@@ -170,8 +176,7 @@ impl<'de> de::Visitor<'de> for ErrorCodeVisitor {
             -32601 => ErrorCode::MethodNotFound,
             -32602 => ErrorCode::InvalidParams,
             -32603 => ErrorCode::InternalError,
-            -32100...-32000=> ErrorCode::ServerError(value),
-            _ => ErrorCode::Unknown(value)
+            _ => ErrorCode::ServerError(value),
         };
         Ok(out)
     }
