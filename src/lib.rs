@@ -106,11 +106,9 @@
 //! ## 8 Extensions
 //!
 //! See [`Request::is_system_extension`](struct.Request.html#method.is_system_extension)
+#![allow(unknown_lints)]
+#![allow(redundant_field_names)]
 
-
-
-
-#[macro_use]
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
@@ -122,11 +120,8 @@ pub use serde_json::Value;
 mod serialize;
 
 use std_prelude::*;
-use std::fmt;
-use std::result;
 use serde::ser::Serialize;
-use serde::de::{Deserialize, DeserializeOwned};
-use serde::de;
+use serde::de::DeserializeOwned;
 
 /// The `jsonrpc` version. Will serialize/deserialize to/from `"2.0"`.
 pub struct V2_0;
@@ -243,7 +238,7 @@ impl From<Id> for IdReq {
         match id {
             Id::String(s) => IdReq::String(s),
             Id::Int(i) => IdReq::Int(i),
-            Id::Null => IdReq::Null
+            Id::Null => IdReq::Null,
         }
     }
 }
@@ -329,7 +324,8 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
 
 impl<T: Serialize + DeserializeOwned> Request<T> {
     pub fn new<I>(id: I, method: String) -> Self
-        where I: Into<IdReq>
+    where
+        I: Into<IdReq>,
     {
         Self {
             jsonrpc: V2_0,
@@ -340,7 +336,8 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
     }
 
     pub fn with_params<I>(id: I, method: String, params: T) -> Self
-        where I: Into<IdReq>
+    where
+        I: Into<IdReq>,
     {
         Self {
             jsonrpc: V2_0,
@@ -402,7 +399,6 @@ impl<T: Serialize + DeserializeOwned> Response<T> {
         Response::Err(Error::new(id, error))
     }
 }
-
 
 /// The jsonrpc Success response, indicating a successful result.
 ///
@@ -527,8 +523,6 @@ impl<T: Serialize + DeserializeOwned> Error<T> {
     }
 }
 
-
-
 /// The jsonrpc Error object, with details of the error.
 ///
 /// When a rpc call encounters an error, the Response Object MUST contain the error member with a
@@ -586,13 +580,7 @@ impl ErrorCode {
     /// to -32099.
     pub fn is_valid(&self) -> bool {
         match *self {
-            ErrorCode::ServerError(value) => {
-                if (-32099 <= value) && (value <= -32000) {
-                    true
-                } else {
-                    false
-                }
-            }
+            ErrorCode::ServerError(value) => (-32099 <= value) && (value <= -32000),
             _ => true,
         }
     }
