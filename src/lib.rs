@@ -3,8 +3,7 @@
 //! This crate defines the datatypes for the jsonrpc spec... and that is IT.
 //!
 //! This crate never touches the network, filesystem, etc. It simply uses serde
-//! to easily construct, serialize and deserialize Request, Response and Error
-//! data types.
+//! to easily construct, serialize and deserialize Request and Response data types.
 //!
 //! http://www.jsonrpc.org/specification_v2
 
@@ -18,9 +17,6 @@ extern crate std_prelude;
 pub use serde_json::Value;
 
 mod serialize;
-mod from_string;
-
-pub use from_string::from_str;
 
 use std_prelude::*;
 use std::fmt;
@@ -28,37 +24,6 @@ use std::result;
 use serde::ser::Serialize;
 use serde::de::{Deserialize, DeserializeOwned};
 use serde::de;
-
-/// An undetermined Response object. Get using `from_str`.
-pub type Result<T: Serialize + DeserializeOwned> =
-    result::Result<Response<T>, Error<serde_json::Value>>;
-
-/// An error that happens if the result could not be deserialized into either
-/// Response or Error type.
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct DeResultError {
-    hint: String,
-}
-
-impl DeResultError {
-    pub fn new(hint: String) -> Self {
-        Self {
-            hint: hint,
-        }
-    }
-}
-
-impl fmt::Display for DeResultError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", ::std::error::Error::description(self))
-    }
-}
-
-impl ::std::error::Error for DeResultError {
-    fn description(&self) -> &str {
-        &self.hint
-    }
-}
 
 /// The `jsonrpc` version. Will serialize/deserialize to/from `"2.0"`.
 pub struct V2_0;
@@ -69,17 +34,6 @@ pub struct V2_0;
 ///
 /// The Server MUST reply with the same value in the Response object if included. This member is
 /// used to correlate the context between the two objects.
-///
-/// ## TODO: Notification
-///
-/// A Notification is a Request object without an "id" member. A Request object that is a
-/// Notification signifies the Client's lack of interest in the corresponding Response object, and
-/// as such no Response object needs to be returned to the client. The Server MUST NOT reply to a
-/// Notification, including those that are within a batch request.
-///
-/// Notifications are not confirmable by definition, since they do not have a Response object to be
-/// returned. As such, the Client would not be aware of any errors (like e.g. "Invalid
-/// params","Internal error").
 ///
 /// # Examples
 ///
@@ -122,6 +76,39 @@ impl From<String> for Id {
 impl From<i64> for Id {
     fn from(v: i64) -> Self {
         Id::Int(v)
+    }
+}
+
+/// Identical to [`Id`](enum.Id.html) except has the Notification type. Typically you should use
+/// `Id` since all functions that would accept IdReq accept `Into<IdReq>`.
+///
+/// # Notification
+///
+/// A Notification is a Request object without an "id" member. A Request object that is a
+/// Notification signifies the Client's lack of interest in the corresponding Response object, and
+/// as such no Response object needs to be returned to the client. The Server MUST NOT reply to a
+/// Notification, including those that are within a batch request.
+///
+/// Notifications are not confirmable by definition, since they do not have a Response object to be
+/// returned. As such, the Client would not be aware of any errors (like e.g. "Invalid
+/// params","Internal error").
+///
+/// https://github.com/serde-rs/serde/issues/984
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IdReq {
+    String(String),
+    Int(i64),
+    Null,
+    Notification,
+}
+
+impl From<Id> for IdReq {
+    fn from(id: Id) -> Self {
+        match id {
+            Id::String(s) => IdReq::String(s),
+            Id::Int(i) => IdReq::Int(i),
+            Id::Null => IdReq::Null
+        }
     }
 }
 
@@ -211,11 +198,11 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
     }
 }
 
-/// The jsonrpc Response response, indicating a successful result.
+/// The Result is either:
+/// - a jsonrpc Response (with a result of a specific type)
+/// - a Error (with an error of type `serde_json::Value`).
 ///
-/// See the parameters for more information.
-///
-/// # Examples
+/// # Example
 ///
 /// ```rust
 /// # extern crate jrpc;
@@ -224,7 +211,60 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
 ///
 /// # fn main() {
 /// let data: Vec<u32> = vec![1, 2, 3];
-/// let example = Response::new(Id::from(4), data.clone());
+/// let example = Response::with_result(Id::from(4), data.clone());
+/// let json = r#"
+/// {
+///     "jsonrpc": "2.0",
+///     "result": [1,2,3],
+///     "id": 4
+/// }
+/// "#;
+/// let json = json.replace("\n", "").replace(" ", "");
+/// let result = serde_json::to_string(&example).unwrap();
+/// assert_eq!(json, result);
+/// # }
+/// ```
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Response<T> {
+    Ok(Success<T>),
+    Err(Error<Value>),
+}
+
+impl<T: Serialize + DeserializeOwned> Response<T> {
+    /// Retrieve the `id` regardless of whether there was an error or not.
+    pub fn id(&self) -> &Id {
+        match *self {
+            Response::Ok(ref r) => &r.id,
+            Response::Err(ref e) => &e.id,
+        }
+    }
+
+    /// Construct a `Success`
+    pub fn success(id: Id, result: T) -> Self {
+        Response::Ok(Success::new(id, result))
+    }
+
+    pub fn error(id: Id, error: ErrorObject<Value>) -> Self {
+        Response::Err(Error::new(id, error))
+    }
+}
+
+
+/// The jsonrpc Success response, indicating a successful result.
+///
+/// See the parameters for more information.
+///
+/// # Examples
+///
+/// ```rust
+/// # extern crate jrpc;
+/// extern crate serde_json;
+/// use jrpc::{Id, Success};
+///
+/// # fn main() {
+/// let data: Vec<u32> = vec![1, 2, 3];
+/// let example = Success::new(Id::from(4), data.clone());
 /// let json = r#"
 /// {
 ///     "jsonrpc": "2.0",
@@ -239,7 +279,7 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
 /// ```
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Response<T> {
+pub struct Success<T> {
     /// A String specifying the version of the JSON-RPC protocol. MUST be exactly "2.0".
     pub jsonrpc: V2_0,
 
@@ -255,7 +295,7 @@ pub struct Response<T> {
     pub id: Id,
 }
 
-impl<T: Serialize + DeserializeOwned> Response<T> {
+impl<T: Serialize + DeserializeOwned> Success<T> {
     pub fn new(id: Id, result: T) -> Self {
         Self {
             jsonrpc: V2_0,
@@ -323,6 +363,18 @@ pub struct Error<T> {
     pub error: ErrorObject<T>,
     pub id: Id,
 }
+
+impl<T: Serialize + DeserializeOwned> Error<T> {
+    fn new(id: Id, error: ErrorObject<T>) -> Self {
+        Error {
+            jsonrpc: V2_0,
+            error: error,
+            id: id,
+        }
+    }
+}
+
+
 
 /// The jsonrpc Error object, with details of the error.
 ///
