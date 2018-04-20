@@ -1,7 +1,7 @@
-extern crate jsonrpc_spec;
+extern crate jrpc;
 extern crate serde_json;
 
-use jsonrpc_spec::*;
+use jrpc::*;
 
 #[test]
 fn test_id() {

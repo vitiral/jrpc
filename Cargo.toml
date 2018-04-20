@@ -1,7 +1,13 @@
 [package]
-name = "jsonrpc_spec"
-version = "0.1.0"
 authors = ["Garrett Berg <vitiral@gmail.com>"]
+description = "types for the jsonrpc specification, ultra lightweight"
+documentation = "https://docs.rs/jrpc"
+keywords = ["jsonrpc", "spec"]
+license = "MIT OR Apache-2.0"
+name = "jrpc"
+readme = "README.md"
+repository = "https://github.com/vitiral/jrpc"
+version = "0.0.1"
 
 [dependencies]
 serde = "1.0.40"

@@ -1,6 +1,8 @@
 //! Crate to define the jsonrpc spec datatypes using serde -- that is it.
 //!
 //! This crate never touches the network, filesystem, etc.
+//!
+//! http://www.jsonrpc.org/specification_v2
 
 #[macro_use]
 extern crate serde;
@@ -8,67 +10,18 @@ extern crate serde;
 extern crate serde_derive;
 extern crate std_prelude;
 
+mod serialize;
+
 use std_prelude::*;
-use std::result;
-use std::fmt;
-use serde::{de, ser};
 use serde::ser::Serialize;
 use serde::de::Deserialize;
 
+/// The `jsonrpc` version. Will serialize/deserialize to/from `"2.0"`.
 pub struct V2_0;
-
-impl ser::Serialize for V2_0 {
-    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        serializer.serialize_str("2.0")
-    }
-}
-
-impl fmt::Debug for V2_0 {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("\"2.0\"")
-    }
-}
-
-impl de::Expected for V2_0 {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("\"2.0\"")
-    }
-}
-
-struct V2_0Visitor;
-
-impl<'de> de::Visitor<'de> for V2_0Visitor {
-    type Value = V2_0;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("exactly \"2.0\"")
-    }
-
-    fn visit_str<E>(self, value: &str) -> result::Result<V2_0, E>
-    where
-        E: de::Error,
-    {
-        if value == "2.0" {
-            Ok(V2_0)
-        } else {
-            Err(de::Error::invalid_value(de::Unexpected::Str(value), &V2_0))
-        }
-    }
-}
-
-impl<'de> de::Deserialize<'de> for V2_0 {
-    fn deserialize<D>(deserializer: D) -> result::Result<V2_0, D::Error>
-        where D: de::Deserializer<'de>
-    {
-        deserializer.deserialize_str(V2_0Visitor)
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(untagged)]
+/// The jsonrpc `id` field. Can be a string, integer or null.
 pub enum Id {
     String(String),
     Int(u64),
@@ -88,6 +41,7 @@ impl From<u64> for Id {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+/// The jsonrpc Request object.
 pub struct Request<T> {
     pub jsonrpc: V2_0,
     pub method: String,
@@ -96,6 +50,7 @@ pub struct Request<T> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+/// The jsonrpc Result response, indicating a successful result.
 pub struct Result<T> {
     pub jsonrpc: V2_0,
     pub result: T,
@@ -103,6 +58,7 @@ pub struct Result<T> {
 }
 
 // #[derive(Debug, Serialize, Deserialize)]
+/// The jsonrpc Error response, indicating an error.
 pub struct Error<T> {
     pub jsonrpc: V2_0,
     pub error: ErrorObject<T>,
@@ -111,6 +67,10 @@ pub struct Error<T> {
 
 
 #[derive(Debug, Serialize, Deserialize)]
+/// The jsonrpc Error object, with details of the error.
+///
+/// Typically you may want to deserialze this with `T == serde_json::Value`
+/// to first inspect the value of the `ErrorCode`.
 pub struct ErrorObject<T> {
     pub code: ErrorCode,
     pub message: String,
@@ -118,74 +78,51 @@ pub struct ErrorObject<T> {
 }
 
 #[derive(Debug)]
+/// An error code.
 pub enum ErrorCode {
-    /// -32700   Parse error   Invalid JSON was received by the server.
-    /// An error occurred on the server while parsing the JSON text.
+    /// - `-32700`: Parse error. Invalid JSON was received by the server.
+    ///   An error occurred on the server while parsing the JSON text.
     ParseError,
-    /// -32600   Invalid Request   The JSON sent is not a valid Request object.
+    /// - `-32600`: Invalid Request. The JSON sent is not a valid Request object.
     InvalidRequest,
-    /// -32601   Method not found   The method does not exist / is not available.
+    /// - `-32601`: Method not found. The method does not exist / is not available.
     MethodNotFound,
-    /// -32602   Invalid params   Invalid method parameter(s).
+    /// - `-32602`: Invalid params. Invalid method parameter(s).
     InvalidParams,
-    /// -32603   Internal error   Internal JSON-RPC error.
+    /// - `-32603`: Internal error. Internal JSON-RPC error.
     InternalError,
-    /// -32000 to -32099 	Server error 	Reserved for implementation-defined server-errors.
+    /// - `-32000 to -32099`: Server error. Reserved for implementation-defined server-errors.
     ServerError(i64),
 }
 
-impl ser::Serialize for ErrorCode {
-    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        let value = match *self {
-            ErrorCode::ParseError => -32700,
-            ErrorCode::InvalidRequest => -32600,
-            ErrorCode::MethodNotFound => -32601,
-            ErrorCode::InvalidParams => -32602,
-            ErrorCode::InternalError => -32603,
-            ErrorCode::ServerError(value) => value,
-        };
-        serializer.serialize_i64(value)
+impl ErrorCode {
+    /// Return whether the ErrorCode is correct.
+    ///
+    /// This will only return `false` if this is ServerError and is outside of the range of -32000
+    /// to -32099.
+    fn is_valid(&self) -> bool {
+        match *self {
+            ErrorCode::ServerError(value) => {
+                if (-32099 <= value) && (value <= -32000) {
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => true,
+        }
     }
 }
 
-impl de::Expected for ErrorCode {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "{:?}", self)
-    }
-}
-
-struct ErrorCodeVisitor;
-
-impl<'de> de::Visitor<'de> for ErrorCodeVisitor {
-    type Value = ErrorCode;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("A valid json-rpc error code")
-    }
-
-    fn visit_i64<E>(self, value: i64) -> result::Result<ErrorCode, E>
-    where
-        E: de::Error,
-    {
-        let out = match value {
+impl From<i64> for ErrorCode {
+    fn from(v: i64) -> ErrorCode {
+        match v {
             -32700 => ErrorCode::ParseError,
             -32600 => ErrorCode::InvalidRequest,
             -32601 => ErrorCode::MethodNotFound,
             -32602 => ErrorCode::InvalidParams,
             -32603 => ErrorCode::InternalError,
-            _ => ErrorCode::ServerError(value),
-        };
-        Ok(out)
-    }
-}
-
-impl<'de> de::Deserialize<'de> for ErrorCode {
-    fn deserialize<D>(deserializer: D) -> result::Result<ErrorCode, D::Error>
-        where D: de::Deserializer<'de>
-    {
-        deserializer.deserialize_i64(ErrorCodeVisitor)
+            _ => ErrorCode::ServerError(v),
+        }
     }
 }
