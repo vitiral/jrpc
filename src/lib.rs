@@ -108,6 +108,7 @@
 //! See [`Request::is_system_extension`](struct.Request.html#method.is_system_extension)
 #![allow(unknown_lints)]
 #![allow(redundant_field_names)]
+#![warn(missing_docs)]
 
 extern crate serde;
 #[macro_use]
@@ -159,10 +160,14 @@ pub struct V2_0;
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Id {
+    /// An String id
     String(String),
+    /// An Number id that must be an integer.
+    ///
+    /// We intentionally do not allow floating point values.
     Int(i64),
+    /// A null id
     Null,
-    // FIXME: handle Notification type. If id doesn't exist then it is notification.
 }
 
 impl From<String> for Id {
@@ -227,9 +232,15 @@ impl From<i64> for Id {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum IdReq {
+    /// An String id
     String(String),
+    /// An Number id that must be an integer.
+    ///
+    /// We intentionally do not allow floating point values.
     Int(i64),
+    /// A null id
     Null,
+    /// The notification id, i.e. the id is absent.
     Notification,
 }
 
@@ -320,21 +331,35 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
     pub fn is_system_extension(&self) -> bool {
         self.method.starts_with(".rpc")
     }
+
+    /// Helper to serialize the Request as json.
+    pub fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
+
+    /// Helper to deserialize the Request from json.
+    pub fn from_str(s: &str) -> serde_json::Result<T>
+    {
+        serde_json::from_str(s)
+    }
 }
 
 impl<T: Serialize + DeserializeOwned> Request<T> {
-    pub fn new<I>(id: I, method: String) -> Self
+    /// Create a new Request.
+    pub fn new<I, S>(id: I, method: S) -> Self
     where
         I: Into<IdReq>,
+        S: Into<String>,
     {
         Self {
             jsonrpc: V2_0,
-            method: method,
+            method: method.into(),
             params: None,
             id: id.into(),
         }
     }
 
+    /// Create a new Request with the specified params.
     pub fn with_params<I>(id: I, method: String, params: T) -> Self
     where
         I: Into<IdReq>,
@@ -377,7 +402,9 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Response<T> {
+    /// The Response has a `result` object and not an `error` object.
     Ok(Success<T>),
+    /// The Response has a `error` object and not an `result` object.
     Err(Error<Value>),
 }
 
@@ -395,8 +422,23 @@ impl<T: Serialize + DeserializeOwned> Response<T> {
         Response::Ok(Success::new(id, result))
     }
 
-    pub fn error(id: Id, error: ErrorObject<Value>) -> Self {
-        Response::Err(Error::new(id, error))
+    /// Construct an `Error`
+    pub fn error<C, S>(id: Id, code: C, message: S, data: Option<Value>) -> Self
+        where C: Into<ErrorCode>,
+              S: Into<String>,
+    {
+        Response::Err(Error::new(id, code, message, data))
+    }
+
+    /// Helper to serialize the Response as json.
+    pub fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
+
+    /// Helper to deserialize the Response from json.
+    pub fn from_str(s: &str) -> serde_json::Result<T>
+    {
+        serde_json::from_str(s)
     }
 }
 
@@ -445,12 +487,24 @@ pub struct Success<T> {
 }
 
 impl<T: Serialize + DeserializeOwned> Success<T> {
+    /// Construct a `Success`, i.e. a Response with a `result` object.
     pub fn new(id: Id, result: T) -> Self {
         Self {
             jsonrpc: V2_0,
             result: result,
             id: id,
         }
+    }
+
+    /// Helper to serialize the Success as json.
+    pub fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
+
+    /// Helper to deserialize the Success from json.
+    pub fn from_str(s: &str) -> serde_json::Result<T>
+    {
+        serde_json::from_str(s)
     }
 }
 
@@ -508,18 +562,40 @@ impl<T: Serialize + DeserializeOwned> Success<T> {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Error<T> {
+    /// Always "2.0"
     pub jsonrpc: V2_0,
+    /// The error object.
     pub error: ErrorObject<T>,
+    /// The id of the request.
     pub id: Id,
 }
 
 impl<T: Serialize + DeserializeOwned> Error<T> {
-    fn new(id: Id, error: ErrorObject<T>) -> Self {
+    /// Helper to create a new `Error` object.
+    pub fn new<C, S>(id: Id, code: C, message: S, data: Option<T>) -> Self
+        where C: Into<ErrorCode>,
+              S: Into<String>,
+    {
         Error {
             jsonrpc: V2_0,
-            error: error,
+            error: ErrorObject {
+                code: code.into(),
+                message: message.into(),
+                data: data,
+            },
             id: id,
         }
+    }
+
+    /// Helper to serialize the Error as json.
+    pub fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
+
+    /// Helper to deserialize the Error from json.
+    pub fn from_str(s: &str) -> serde_json::Result<T>
+    {
+        serde_json::from_str(s)
     }
 }
 
