@@ -1,7 +1,7 @@
 # jrpc: an ultra lightweight crate for types from the jsonrpc spec
 
 [![Build Status](https://travis-ci.org/vitiral/jrpc.svg?branch=master)](https://travis-ci.org/vitiral/jrpc)
-[![Build status](https://ci.appveyor.com/api/projects/status/vgis54solhygre0n?svg=true)](https://ci.appveyor.com/project/rust-crates/path-abs)
+[![Build status](https://ci.appveyor.com/api/projects/status/vgis54solhygre0n?svg=true)](https://ci.appveyor.com/project/vitiral/jrpc)
 [![Docs](https://docs.rs/jrpc/badge.svg)](https://docs.rs/jrpc)
 
 See the docs for more details.
