@@ -95,6 +95,7 @@ impl From<i64> for Id {
 ///
 /// https://github.com/serde-rs/serde/issues/984
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum IdReq {
     String(String),
     Int(i64),
@@ -175,25 +176,30 @@ pub struct Request<T> {
     pub params: Option<T>,
 
     /// The `id`. See [`Id`](enum.Id.html)
-    pub id: Id,
+    #[serde(default = "notification")]
+    pub id: IdReq,
 }
 
 impl<T: Serialize + DeserializeOwned> Request<T> {
-    pub fn new(id: Id, method: String) -> Self {
+    pub fn new<I>(id: I, method: String) -> Self
+        where I: Into<IdReq>
+    {
         Self {
             jsonrpc: V2_0,
             method: method,
             params: None,
-            id: id,
+            id: id.into(),
         }
     }
 
-    pub fn with_params(id: Id, method: String, params: T) -> Self {
+    pub fn with_params<I>(id: I, method: String, params: T) -> Self
+        where I: Into<IdReq>
+    {
         Self {
             jsonrpc: V2_0,
             method: method,
             params: Some(params),
-            id: id,
+            id: id.into(),
         }
     }
 }
@@ -455,4 +461,8 @@ impl From<i64> for ErrorCode {
             _ => ErrorCode::ServerError(v),
         }
     }
+}
+
+fn notification() -> IdReq {
+    IdReq::Notification
 }
