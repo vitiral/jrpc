@@ -5,7 +5,110 @@
 //! This crate never touches the network, filesystem, etc. It simply uses serde
 //! to easily construct, serialize and deserialize Request and Response data types.
 //!
-//! http://www.jsonrpc.org/specification_v2
+//! # Specification
+//!
+//! The below is directly copy/pasted from: [http://www.jsonrpc.org/specification][spec]
+//!
+//! The types try to correctly copy the relevant documentation snippets in their docstring.
+//!
+//! [spec]: http://www.jsonrpc.org/specification
+//!
+//! ## 1 Overview
+//!
+//! JSON-RPC is a stateless, light-weight remote procedure call (RPC) protocol. Primarily this
+//! specification defines several data structures and the rules around their processing. It is
+//! transport agnostic in that the concepts can be used within the same process, over sockets, over
+//! http, or in many various message passing environments. It uses JSON (RFC 4627) as data format.
+//!
+//! It is designed to be simple!
+//!
+//! # 2 Conventions
+//!
+//! The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT",
+//! "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted
+//! as described in RFC 2119.
+//!
+//! Since JSON-RPC utilizes JSON, it has the same type system (see http://www.json.org or RFC
+//! 4627). JSON can represent four primitive types (Strings, Numbers, Booleans, and Null) and two
+//! structured types (Objects and Arrays). The term "Primitive" in this specification references
+//! any of those four primitive JSON types. The term "Structured" references either of the
+//! structured JSON types. Whenever this document refers to any JSON type, the first letter is
+//! always capitalized: Object, Array, String, Number, Boolean, Null. True and False are also
+//! capitalized.
+//!
+//! All member names exchanged between the Client and the Server that are considered for matching
+//! of any kind should be considered to be case-sensitive. The terms function, method, and
+//! procedure can be assumed to be interchangeable.
+//!
+//! The Client is defined as the origin of Request objects and the handler of Response objects.
+//!
+//! The Server is defined as the origin of Response objects and the handler of Request objects.
+//!
+//! One implementation of this specification could easily fill both of those roles, even at the
+//! same time, to other different clients or the same client. This specification does not address
+//! that layer of complexity.
+//!
+//! ## 3 Compatibility
+//!
+//! JSON-RPC 2.0 Request objects and Response objects may not work with existing JSON-RPC 1.0
+//! clients or servers. However, it is easy to distinguish between the two versions as 2.0 always
+//! has a member named "jsonrpc" with a String value of "2.0" whereas 1.0 does not. Most 2.0
+//! implementations should consider trying to handle 1.0 objects, even if not the peer-to-peer and
+//! class hinting aspects of 1.0.
+//!
+//! ## 4 Request Object
+//!
+//! See [`Request`](struct.Request.html)
+//!
+//!
+//! ## 4.1 Notification
+//!
+//! See [`IdReq`](enum.IdReq.html)
+//!
+//! ## 4.2 Parameter Structures
+//!
+//! See [`Request.params`](struct.Request.html#structfield.params)
+//!
+//! ## 5 Response object
+//!
+//! See [`Response`](struct.Response.html)
+//!
+//! ## 5.1 Error object
+//!
+//! See [`ErrorObject`](struct.ErrorObject.html)
+//!
+//! ## 6 Batch
+//!
+//! > Note: simply use a `Vec<Request>` and `Vec<Response>`
+//!
+//! To send several Request objects at the same time, the Client MAY send an Array filled with
+//! Request objects.
+//!
+//! The Server should respond with an Array containing the corresponding Response objects, after
+//! all of the batch Request objects have been processed. A Response object SHOULD exist for each
+//! Request object, except that there SHOULD NOT be any Response objects for notifications. The
+//! Server MAY process a batch rpc call as a set of concurrent tasks, processing them in any order
+//! and with any width of parallelism.
+//!
+//! The Response objects being returned from a batch call MAY be returned in any order within the
+//! Array. The Client SHOULD match contexts between the set of Request objects and the resulting
+//! set of Response objects based on the id member within each Object.
+//!
+//! If the batch rpc call itself fails to be recognized as an valid JSON or as an Array with at
+//! least one value, the response from the Server MUST be a single Response object. If there are no
+//! Response objects contained within the Response array as it is to be sent to the client, the
+//! server MUST NOT return an empty Array and should return nothing at all.
+//!
+//! ## 7 Examples
+//!
+//! Ommitted. See the [specification][spec]
+//!
+//! ## 8 Extensions
+//!
+//! See [`Request::is_system_extension`](struct.Request.html#method.is_system_extension)
+
+
+
 
 #[macro_use]
 extern crate serde;
@@ -94,6 +197,38 @@ impl From<i64> for Id {
 /// params","Internal error").
 ///
 /// https://github.com/serde-rs/serde/issues/984
+///
+/// # Examples
+/// This just demonstrates what happens if `id` is absent vs null.
+///
+/// ```rust
+/// # extern crate jrpc;
+/// extern crate serde_json;
+/// use jrpc::{Id, IdReq, Request, Value};
+///
+/// # fn main() {
+/// // id == null
+/// let json = r#"
+/// {
+///     "jsonrpc": "2.0",
+///     "method": "CreateFoo",
+///     "id": null
+/// }
+/// "#;
+/// let request: Request<Value> = serde_json::from_str(json).unwrap();
+/// assert_eq!(request.id, Id::Null.into());
+///
+/// // id does not exist
+/// let json = r#"
+/// {
+///     "jsonrpc": "2.0",
+///     "method": "NotifyFoo"
+/// }
+/// "#;
+/// let request: Request<Value> = serde_json::from_str(json).unwrap();
+/// assert_eq!(request.id, IdReq::Notification);
+/// # }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum IdReq {
@@ -173,11 +308,23 @@ pub struct Request<T> {
     ///   generated. The names MUST match exactly, including case, to the method's expected
     ///   parameters.
     ///
+    #[serde(default)]
     pub params: Option<T>,
 
     /// The `id`. See [`Id`](enum.Id.html)
     #[serde(default = "notification")]
     pub id: IdReq,
+}
+
+impl<T: Serialize + DeserializeOwned> Request<T> {
+    /// Return whether the method name is defined as a system extension.
+    ///
+    /// Method names that begin with `"rpc."` are reserved for system extensions, and MUST NOT be
+    /// used for anything else. Each system extension is defined in a related specification. All
+    /// system extensions are OPTIONAL.
+    pub fn is_system_extension(&self) -> bool {
+        self.method.starts_with(".rpc")
+    }
 }
 
 impl<T: Serialize + DeserializeOwned> Request<T> {
@@ -217,7 +364,7 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
 ///
 /// # fn main() {
 /// let data: Vec<u32> = vec![1, 2, 3];
-/// let example = Response::with_result(Id::from(4), data.clone());
+/// let example = Response::success(Id::from(4), data.clone());
 /// let json = r#"
 /// {
 ///     "jsonrpc": "2.0",
@@ -402,6 +549,7 @@ pub struct ErrorObject<T> {
     ///
     /// The value of this member is defined by the Server (e.g. detailed error
     /// information, nested errors etc.).
+    #[serde(default = "default_t")]
     pub data: Option<T>,
 }
 
@@ -465,4 +613,8 @@ impl From<i64> for ErrorCode {
 
 fn notification() -> IdReq {
     IdReq::Notification
+}
+
+fn default_t<T>() -> Option<T> {
+    None
 }
