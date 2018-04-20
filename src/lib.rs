@@ -275,7 +275,7 @@ impl From<Id> for IdReq {
 /// let value: Vec<u32> = vec![1, 2, 3];
 /// let request = Request::with_params(
 ///     Id::from(4),
-///     "CreateFoo".into(),
+///     "CreateFoo",
 ///     Some(value.clone()),
 /// );
 /// let json = r#"
@@ -350,30 +350,52 @@ impl<T: Serialize + DeserializeOwned> Request<T> {
     }
 }
 
-impl<T: Serialize + DeserializeOwned> Request<T> {
+impl Request<()> {
     /// Create a new Request.
-    pub fn new<I, S>(id: I, method: S) -> Request<()>
+    ///
+    /// # Examples
+    ///
+    /// # extern crate jrpc;
+    ///
+    /// ```rust
+    /// # extern crate jrpc;
+    /// extern crate serde_json;
+    /// use jrpc::{Id, Request};
+    ///
+    /// # fn main() {
+    /// let value: Vec<u32> = vec![1, 2, 3];
+    /// let request = Request::new(
+    ///     Id::from(4),
+    ///     "CreateFoo"
+    /// );
+    /// println!("{}", request.to_string());
+    /// # }
+    pub fn new<I, S>(id: I, method: S) -> Self
     where
         I: Into<IdReq>,
         S: Into<String>,
     {
         let params: Option<()> = None;
-        Request {
+        Self {
             jsonrpc: V2_0,
             method: method.into(),
             params: params,
             id: id.into(),
         }
     }
+}
+
+impl<T: Serialize + DeserializeOwned> Request<T> {
 
     /// Create a new Request with the specified params.
-    pub fn with_params<I>(id: I, method: String, params: T) -> Self
+    pub fn with_params<I, S>(id: I, method: S, params: T) -> Self
     where
         I: Into<IdReq>,
+        S: Into<String>
     {
         Self {
             jsonrpc: V2_0,
-            method: method,
+            method: method.into(),
             params: Some(params),
             id: id.into(),
         }
