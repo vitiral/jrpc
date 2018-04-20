@@ -1,6 +1,10 @@
-//! Crate to define the jsonrpc spec datatypes using serde -- that is it.
+//! # jrpc: an ultra lightweight crate for types from the jsonrpc spec
 //!
-//! This crate never touches the network, filesystem, etc.
+//! This crate defines the datatypes for the jsonrpc spec... and that is IT.
+//!
+//! This crate never touches the network, filesystem, etc. It simply uses serde
+//! to easily construct, serialize and deserialize Request, Result and Error
+//! data types.
 //!
 //! http://www.jsonrpc.org/specification_v2
 
@@ -19,9 +23,23 @@ use serde::de::{Deserialize, DeserializeOwned};
 /// The `jsonrpc` version. Will serialize/deserialize to/from `"2.0"`.
 pub struct V2_0;
 
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(untagged)]
-/// The jsonrpc `id` field. Can be a string, integer or null.
+/// An identifier established by the Client that MUST contain a String, Number, or NULL value if
+/// included. If it is not included it is assumed to be a notification. The value SHOULD normally
+/// not be Null and Numbers SHOULD NOT contain fractional parts
+///
+/// The Server MUST reply with the same value in the Response object if included. This member is
+/// used to correlate the context between the two objects.
+///
+/// ## TODO: Notification
+///
+/// A Notification is a Request object without an "id" member. A Request object that is a
+/// Notification signifies the Client's lack of interest in the corresponding Response object, and
+/// as such no Response object needs to be returned to the client. The Server MUST NOT reply to a
+/// Notification, including those that are within a batch request.
+///
+/// Notifications are not confirmable by definition, since they do not have a Response object to be
+/// returned. As such, the Client would not be aware of any errors (like e.g. "Invalid
+/// params","Internal error").
 ///
 /// # Examples
 ///
@@ -40,12 +58,19 @@ pub struct V2_0;
 ///     serde_json::from_str::<Id>("\"foo\"").unwrap(),
 ///     Id::String("foo".into()),
 /// );
+/// assert_eq!(
+///     serde_json::from_str::<Id>("null").unwrap(),
+///     Id::Null,
+/// );
 /// # }
 /// ```
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum Id {
     String(String),
-    Int(u64),
+    Int(i64),
     Null,
+    // FIXME: handle Notification type. If id doesn't exist then it is notification.
 }
 
 impl From<String> for Id {
@@ -54,13 +79,12 @@ impl From<String> for Id {
     }
 }
 
-impl From<u64> for Id {
-    fn from(v: u64) -> Self {
+impl From<i64> for Id {
+    fn from(v: i64) -> Self {
         Id::Int(v)
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
 /// The jsonrpc Request object.
 ///
 /// # Examples
@@ -78,7 +102,8 @@ impl From<u64> for Id {
 ///     Some(value.clone()),
 /// );
 /// let json = r#"
-/// {"jsonrpc": "2.0",
+/// {
+///     "jsonrpc": "2.0",
 ///     "method": "CreateFoo",
 ///     "params": [1,2,3],
 ///     "id": 4
@@ -89,10 +114,20 @@ impl From<u64> for Id {
 /// assert_eq!(json, result);
 /// # }
 /// ```
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Request<T> {
+    /// A String specifying the version of the JSON-RPC protocol. MUST be exactly "2.0".
     pub jsonrpc: V2_0,
+    /// A String containing the name of the method to be invoked.
+    ///
+    /// Method names that begin with the word rpc followed by a period character (U+002E or ASCII
+    /// 46) are reserved for rpc-internal methods and extensions and MUST NOT be used for anything
+    /// else.
     pub method: String,
+    /// A Structured value that holds the parameter values to be used during the invocation of the
+    /// method.
     pub params: Option<T>,
+    /// The `id`. See [`Id`](enum.Id.html)
     pub id: Id,
 }
 
@@ -117,16 +152,99 @@ impl<T: Serialize+DeserializeOwned> Request<T> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
 /// The jsonrpc Result response, indicating a successful result.
+///
+/// # Examples
+///
+/// ```rust
+/// # extern crate jrpc;
+/// extern crate serde_json;
+/// use jrpc::{Id, Result};
+///
+/// # fn main() {
+/// let data: Vec<u32> = vec![1, 2, 3];
+/// let example = Result::new(Id::from(4), data.clone());
+/// let json = r#"
+/// {
+///     "jsonrpc": "2.0",
+///     "result": [1,2,3],
+///     "id": 4
+/// }
+/// "#;
+/// let json = json.replace("\n", "").replace(" ", "");
+/// let result = serde_json::to_string(&example).unwrap();
+/// assert_eq!(json, result);
+/// # }
+/// ```
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Result<T> {
     pub jsonrpc: V2_0,
     pub result: T,
     pub id: Id,
 }
 
-// #[derive(Debug, Serialize, Deserialize)]
+impl<T: Serialize+DeserializeOwned> Result<T> {
+    pub fn new(id: Id, result: T) -> Self {
+        Self {
+            jsonrpc: V2_0,
+            result: result,
+            id: id,
+        }
+    }
+}
+
 /// The jsonrpc Error response, indicating an error.
+///
+/// Since the `T` in the `ErrorObject` will _at least_ be based on the `ErrorCode` it is
+/// recommended that you deserialize this type as `T=Value` first.
+///
+/// # Examples
+///
+/// ```rust
+/// # extern crate jrpc;
+/// extern crate serde_json;
+/// use jrpc::{Id, Error, ErrorCode, ErrorObject, V2_0};
+///
+/// # fn main() {
+/// let data: Vec<u32> = vec![1, 2, 3];
+/// let example = Error {
+///     jsonrpc: V2_0,
+///     error: ErrorObject {
+///         code: ErrorCode::from(-32000),
+///         message: "BadIndexes".into(),
+///         data: Some(data.clone()),
+///     },
+///     id: Id::from(4),
+/// };
+///
+/// let json = r#"
+/// {
+///     "jsonrpc": "2.0",
+///     "error": {
+///         "code": -32000,
+///         "message": "BadIndexes",
+///         "data": [1,2,3]
+///     },
+///     "id": 4
+/// }
+/// "#;
+/// let json = json.replace("\n", "").replace(" ", "");
+/// let result = serde_json::to_string(&example).unwrap();
+/// assert_eq!(json, result);
+///
+/// // This is how it is recommended you deserialize:
+/// let error: Error<serde_json::Value> =
+///     serde_json::from_str(&json).unwrap();
+/// if error.error.code != ErrorCode::ServerError(-32000) {
+///     panic!("unexpected error");
+/// }
+/// let result: Vec<u32> = serde_json::from_value(
+///     error.error.data.unwrap()
+/// ).unwrap();
+/// assert_eq!(data, result);
+/// # }
+/// ```
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Error<T> {
     pub jsonrpc: V2_0,
     pub error: ErrorObject<T>,
@@ -134,19 +252,19 @@ pub struct Error<T> {
 }
 
 
-#[derive(Debug, Serialize, Deserialize)]
 /// The jsonrpc Error object, with details of the error.
 ///
 /// Typically you may want to deserialze this with `T == serde_json::Value`
 /// to first inspect the value of the `ErrorCode`.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ErrorObject<T> {
     pub code: ErrorCode,
     pub message: String,
-    pub data: T,
+    pub data: Option<T>,
 }
 
-#[derive(Debug)]
 /// An error code.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum ErrorCode {
     /// - `-32700`: Parse error. Invalid JSON was received by the server.
     ///   An error occurred on the server while parsing the JSON text.
