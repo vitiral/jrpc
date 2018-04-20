@@ -176,6 +176,12 @@ impl From<String> for Id {
     }
 }
 
+impl<'a> From<&'a str> for Id {
+    fn from(s: &'a str) -> Self {
+        Id::String(s.into())
+    }
+}
+
 impl From<i64> for Id {
     fn from(v: i64) -> Self {
         Id::Int(v)
