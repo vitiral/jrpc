@@ -9,7 +9,7 @@ use super::*;
 
 /// Deserialize a jsonrpc Response into a rust Result.
 ///
-/// Autohandles helpful error messages.
+/// Adds helpful error messages regarding the cause of failure.
 pub fn from_str<T: Serialize + DeserializeOwned>(
     s: &str,
 ) -> result::Result<Result<T>, DeResultError> {
@@ -100,11 +100,52 @@ pub fn from_str<T: Serialize + DeserializeOwned>(
         });
     }
 
-    // TODO: look into the error object more.
+    let code = match object.remove("code") {
+        Some(c) => c,
+        None => {
+            return Err(DeResultError {
+                hint: format!("code missing from `error`"),
+            });
+        }
+    };
+
+    match code {
+        Value::Number(n) => {
+            if !n.is_i64() {
+                return Err(DeResultError::new(format!(
+                    "code is a non-i64 number: {:?}",
+                    n
+                )));
+            }
+        }
+        c @ _ => {
+            return Err(DeResultError {
+                hint: format!("`code` is invalid type: {:?}", c),
+            });
+        }
+    }
+
+    let message = match object.remove("message") {
+        Some(m) => m,
+        None => {
+            return Err(DeResultError {
+                hint: format!("message missing from `error`"),
+            });
+        }
+    };
+
+    match message {
+        Value::String(_) => {},
+        m @ _ => {
+            return Err(DeResultError {
+                hint: format!("`message` is invalid type: {:?}", m),
+            });
+        }
+    }
 
     Err(DeResultError {
         hint: format!(
-            "Could not deserialize into either Response or Error\
+            "Could not deserialize into either Response or Error. \
             Possible cause:\n{}", &result_error),
     })
 }
