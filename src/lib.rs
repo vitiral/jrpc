@@ -105,7 +105,8 @@
 //!
 //! ## 8 Extensions
 //!
-//! See [`Request::is_system_extension`](struct.Request.html#method.is_system_extension)
+//! This library does not support checking for extensions. See
+//! [`Request.method`](struct.Request.html#structfield.method) for more details of the spec.
 #![allow(unknown_lints)]
 #![allow(redundant_field_names)]
 #![warn(missing_docs)]
@@ -221,7 +222,7 @@ impl From<i64> for Id {
 ///     "id": null
 /// }
 /// "#;
-/// let request: Request<Value> = serde_json::from_str(json).unwrap();
+/// let request: Request<String, Value> = serde_json::from_str(json).unwrap();
 /// assert_eq!(request.id, Id::Null.into());
 ///
 /// // id does not exist
@@ -231,7 +232,7 @@ impl From<i64> for Id {
 ///     "method": "NotifyFoo"
 /// }
 /// "#;
-/// let request: Request<Value> = serde_json::from_str(json).unwrap();
+/// let request: Request<String, Value> = serde_json::from_str(json).unwrap();
 /// assert_eq!(request.id, IdReq::Notification);
 /// # }
 /// ```
@@ -260,6 +261,21 @@ impl From<Id> for IdReq {
     }
 }
 
+impl IdReq {
+    /// Attempt to convert to an Id.
+    ///
+    /// Returns `None` if this Id is a `Notification`.
+    pub fn to_id(self) -> Option<Id> {
+        let out = match self {
+            IdReq::String(s) => Id::String(s),
+            IdReq::Int(i) => Id::Int(i),
+            IdReq::Null => Id::Null,
+            IdReq::Notification => return None,
+        };
+        Some(out)
+    }
+}
+
 /// A rpc call is represented by sending a Request object to a Server.
 ///
 /// See the parameters for details.
@@ -275,7 +291,7 @@ impl From<Id> for IdReq {
 /// let value: Vec<u32> = vec![1, 2, 3];
 /// let request = Request::with_params(
 ///     Id::from(4),
-///     "CreateFoo",
+///     "CreateFoo".to_string(),
 ///     Some(value.clone()),
 /// );
 /// let json = r#"
@@ -292,16 +308,24 @@ impl From<Id> for IdReq {
 /// # }
 /// ```
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Request<T> {
+pub struct Request<M, T> {
     /// A String specifying the version of the JSON-RPC protocol. MUST be exactly "2.0".
     pub jsonrpc: V2_0,
 
-    /// A String containing the name of the method to be invoked.
+    /// A serializable method.
     ///
-    /// Method names that begin with the word rpc followed by a period character (`'.'`, `U+002E`
-    /// or ASCII `0x2e`) are reserved for rpc-internal methods and extensions and MUST NOT be used
-    /// for anything else.
-    pub method: String,
+    /// The spec states it must be a String containing the name of the method to be invoked. This
+    /// library makes no guarantees about this. It is recomended to use a simple `enum` for your
+    /// library's `method`.
+    ///
+    /// ## Section 8: Extensions
+    ///
+    /// Method names that begin with `"rpc."` are reserved for system extensions, and MUST NOT be
+    /// used for anything else. Each system extension is defined in a related specification. All
+    /// system extensions are OPTIONAL.
+    ///
+    /// This library provides no way of checking for system extensions.
+    pub method: M,
 
     /// A Structured value that holds the parameter values to be used during the invocation of the
     /// method.
@@ -328,29 +352,19 @@ pub struct Request<T> {
     pub id: IdReq,
 }
 
-impl<T: Serialize + DeserializeOwned> Request<T> {
-    /// Return whether the method name is defined as a system extension.
-    ///
-    /// Method names that begin with `"rpc."` are reserved for system extensions, and MUST NOT be
-    /// used for anything else. Each system extension is defined in a related specification. All
-    /// system extensions are OPTIONAL.
-    pub fn is_system_extension(&self) -> bool {
-        self.method.starts_with(".rpc")
-    }
-
+impl<M: Serialize + DeserializeOwned, T: Serialize + DeserializeOwned> Request<M, T> {
     /// Helper to serialize the Request as json.
     pub fn to_string(&self) -> String {
         serde_json::to_string(self).unwrap()
     }
 
     /// Helper to deserialize the Request from json.
-    pub fn from_str(s: &str) -> serde_json::Result<T>
-    {
+    pub fn from_str(s: &str) -> serde_json::Result<T> {
         serde_json::from_str(s)
     }
 }
 
-impl Request<()> {
+impl<M: Serialize + DeserializeOwned> Request<M, ()> {
     /// Create a new Request.
     ///
     /// # Examples
@@ -366,40 +380,196 @@ impl Request<()> {
     /// let value: Vec<u32> = vec![1, 2, 3];
     /// let request = Request::new(
     ///     Id::from(4),
-    ///     "CreateFoo"
+    ///     "CreateFoo".to_string(),
     /// );
     /// println!("{}", request.to_string());
     /// # }
-    pub fn new<I, S>(id: I, method: S) -> Self
+    pub fn new<I>(id: I, method: M) -> Self
     where
         I: Into<IdReq>,
-        S: Into<String>,
     {
         let params: Option<()> = None;
         Self {
             jsonrpc: V2_0,
-            method: method.into(),
+            method: method,
             params: params,
             id: id.into(),
         }
     }
 }
 
-impl<T: Serialize + DeserializeOwned> Request<T> {
-
+impl<M: Serialize + DeserializeOwned, T: Serialize + DeserializeOwned> Request<M, T> {
     /// Create a new Request with the specified params.
-    pub fn with_params<I, S>(id: I, method: S, params: T) -> Self
+    pub fn with_params<I>(id: I, method: M, params: T) -> Self
     where
         I: Into<IdReq>,
-        S: Into<String>
     {
         Self {
             jsonrpc: V2_0,
-            method: method.into(),
+            method: method,
             params: Some(params),
             id: id.into(),
         }
     }
+}
+
+/// Parse a json string, returning either:
+/// - The parsed `Request`
+/// - An `Error` object created according to the jsonrpc spec (with a _useful_ reason/message).
+///
+/// This parses the json in stages and will correctly return one of the following errors on
+/// failure:
+///
+/// - `ParseError`
+/// - `InvalidRequest`
+/// - `MethodNotFound`
+///
+/// > Reminder: It is up to the user to return the `InvalidParams` error if the `request.params` is
+/// > invalid.
+///
+/// # Examples
+///
+/// ## Well formed Request
+///
+/// ```rust
+/// # extern crate jrpc;
+/// extern crate serde_json;
+/// use jrpc::{Id, Request, V2_0};
+///
+/// # fn main() {
+/// let params: Vec<u32> = vec![1, 2, 3];
+/// let request = Request::with_params(
+///     Id::from(4),
+///     "CreateFoo".to_string(),
+///     Some(params.clone()),
+/// );
+/// let json = r#"
+/// {
+///     "jsonrpc": "2.0",
+///     "method": "CreateFoo",
+///     "params": [1,2,3],
+///     "id": 4
+/// }
+/// "#;
+///
+/// let result: Request<String, _> = jrpc::parse_request(json).unwrap();
+/// let result_params: Vec<u32> = serde_json::from_value(
+///     result.params.unwrap()).unwrap();
+/// assert_eq!(params, result_params);
+/// assert_eq!(request.method, result.method);
+/// assert_eq!(request.id, result.id);
+/// # }
+/// ```
+///
+/// ## Error: `ParseError`
+///
+/// ```rust
+/// # extern crate jrpc;
+/// extern crate serde_json;
+/// use jrpc::{Id, Request, V2_0};
+///
+/// # fn main() {
+/// let params: Vec<u32> = vec![1, 2, 3];
+/// let json = r#"
+/// Not Valid JSON...
+/// "#;
+///
+/// let result: Result<jrpc::Request<String, jrpc::Value>, jrpc::Error<jrpc::Value>> =
+///     jrpc::parse_request(json);
+///
+/// let error = result.unwrap_err();
+/// assert_eq!(error.error.code, jrpc::ErrorCode::ParseError);
+/// # }
+/// ```
+///
+/// ## Error: `InvalidRequest`
+///
+/// ```rust
+/// # extern crate jrpc;
+/// extern crate serde_json;
+/// use jrpc::{Id, Request, V2_0};
+///
+/// # fn main() {
+/// let params: Vec<u32> = vec![1, 2, 3];
+/// let json = r#"
+/// {
+///     "type": "valid json",
+///     "but": "not jsonrpc!"
+/// }
+/// "#;
+///
+/// let result: Result<jrpc::Request<String, jrpc::Value>, jrpc::Error<jrpc::Value>> =
+///     jrpc::parse_request(json);
+///
+/// let error = result.unwrap_err();
+/// assert_eq!(error.error.code, jrpc::ErrorCode::InvalidRequest);
+/// assert!(error.error.message.contains("missing field `jsonrpc`"));
+/// assert_eq!(error.id, jrpc::Id::Null);
+/// # }
+/// ```
+///
+/// ## Error: `MethodNotFound`
+///
+/// ```rust
+/// # extern crate jrpc;
+/// #[macro_use] extern crate serde_derive;
+/// extern crate serde_json;
+/// use jrpc::{Id, Request, V2_0};
+///
+/// #[derive(Debug, Serialize, Deserialize)]
+/// enum Method {
+///     One,
+///     Two,
+/// }
+///
+/// # fn main() {
+/// let params: Vec<u32> = vec![1, 2, 3];
+/// let json = r#"
+/// {
+///     "jsonrpc": "2.0",
+///     "method": "Three",
+///     "params": [1,2,3],
+///     "id": 4
+/// }
+/// "#;
+///
+/// let result: Result<jrpc::Request<Method, jrpc::Value>, jrpc::Error<jrpc::Value>> =
+///     jrpc::parse_request(json);
+///
+/// let error = result.unwrap_err();
+/// assert_eq!(error.error.code, jrpc::ErrorCode::MethodNotFound);
+/// assert!(error.error.message.contains(
+///     "unknown variant `Three`, expected `One` or `Two`"));
+/// assert_eq!(error.id, jrpc::Id::Int(4));
+/// # }
+/// ```
+pub fn parse_request<M>(json: &str) -> Result<Request<M, Value>, Error<Value>>
+where
+    M: Serialize + DeserializeOwned,
+{
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|err| Error::new(Id::Null, ErrorCode::ParseError, err.to_string(), None))?;
+
+    let request: Request<Value, Value> = serde_json::from_value(value)
+        .map_err(|err| Error::new(Id::Null, ErrorCode::InvalidRequest, err.to_string(), None))?;
+
+    let (id, method, params) = (request.id, request.method, request.params);
+
+    let method: M = serde_json::from_value(method).map_err(|err| {
+        Error::new(
+            id.clone().to_id().unwrap_or(Id::Null),
+            ErrorCode::MethodNotFound,
+            err.to_string(),
+            None,
+        )
+    })?;
+
+    Ok(Request {
+        jsonrpc: V2_0,
+        method: method,
+        params: params,
+        id: id,
+    })
 }
 
 /// The Result is either:
@@ -453,8 +623,9 @@ impl<T: Serialize + DeserializeOwned> Response<T> {
 
     /// Construct an `Error`
     pub fn error<C, S>(id: Id, code: C, message: S, data: Option<Value>) -> Self
-        where C: Into<ErrorCode>,
-              S: Into<String>,
+    where
+        C: Into<ErrorCode>,
+        S: Into<String>,
     {
         Response::Err(Error::new(id, code, message, data))
     }
@@ -465,8 +636,7 @@ impl<T: Serialize + DeserializeOwned> Response<T> {
     }
 
     /// Helper to deserialize the Response from json.
-    pub fn from_str(s: &str) -> serde_json::Result<T>
-    {
+    pub fn from_str(s: &str) -> serde_json::Result<T> {
         serde_json::from_str(s)
     }
 }
@@ -531,8 +701,7 @@ impl<T: Serialize + DeserializeOwned> Success<T> {
     }
 
     /// Helper to deserialize the Success from json.
-    pub fn from_str(s: &str) -> serde_json::Result<T>
-    {
+    pub fn from_str(s: &str) -> serde_json::Result<T> {
         serde_json::from_str(s)
     }
 }
@@ -602,8 +771,9 @@ pub struct Error<T> {
 impl<T: Serialize + DeserializeOwned> Error<T> {
     /// Helper to create a new `Error` object.
     pub fn new<C, S>(id: Id, code: C, message: S, data: Option<T>) -> Self
-        where C: Into<ErrorCode>,
-              S: Into<String>,
+    where
+        C: Into<ErrorCode>,
+        S: Into<String>,
     {
         Error {
             jsonrpc: V2_0,
@@ -622,8 +792,7 @@ impl<T: Serialize + DeserializeOwned> Error<T> {
     }
 
     /// Helper to deserialize the Error from json.
-    pub fn from_str(s: &str) -> serde_json::Result<T>
-    {
+    pub fn from_str(s: &str) -> serde_json::Result<T> {
         serde_json::from_str(s)
     }
 }
