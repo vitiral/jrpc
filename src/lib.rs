@@ -414,6 +414,9 @@ impl<M: Serialize + DeserializeOwned, T: Serialize + DeserializeOwned> Request<M
     }
 }
 
+// As reported in the specification, a Notification is a Request object without
+// an "id" member, so we use this function in serde field attribute 
+// #[serde(skip_serializing_if = "path")] to identify a Notification.
 fn id_req_is_notification(id: &IdReq) -> bool {
   match id {
     IdReq::Notification => true,
