@@ -349,6 +349,7 @@ pub struct Request<M, T> {
 
     /// The `id`. See [`Id`](enum.Id.html)
     #[serde(default = "notification")]
+    #[serde(skip_serializing_if = "id_req_is_notification")]
     pub id: IdReq,
 }
 
@@ -411,6 +412,16 @@ impl<M: Serialize + DeserializeOwned, T: Serialize + DeserializeOwned> Request<M
             id: id.into(),
         }
     }
+}
+
+// Return whether the `id` is a `Notification`.
+//
+// Per JSON-RPC-2.0-Section-4.1, we must exclude the `id` field in this case.
+fn id_req_is_notification(id: &IdReq) -> bool {
+  match id {
+    IdReq::Notification => true,
+    _ => false,
+  }
 }
 
 /// Parse a json string, returning either:
