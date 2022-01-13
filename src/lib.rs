@@ -330,7 +330,7 @@ pub struct Request<M, T> {
     /// A Structured value that holds the parameter values to be used during the invocation of the
     /// method.
     ///
-    /// ## Spec Requiement
+    /// ## Spec Requirement
     ///
     /// > Note: the following spec is **not** upheld by this library.
     ///
